@@ -14,7 +14,7 @@ use core::mem::size_of;
 use core::ops::{DerefMut, Neg};
 use agb::display::affine::{AffineMatrix, AffineMatrixBackground};
 use agb::display::object::{AffineMatrixInstance, AffineMode, Graphics, OamManaged, OamUnmanaged, Object, ObjectUnmanaged, SpriteLoader, SpriteVram, Tag};
-use agb::display::Priority;
+use agb::display::{Font, Priority};
 use agb::display::tiled::{AffineBackgroundSize, MapLoan, RegularBackgroundSize, RegularMap, Tiled0, Tiled1, TiledMap, TileFormat, TileSetting, VRamManager};
 use agb::display::tiled::RegularBackgroundSize::{Background32x32, Background64x64};
 use agb::display::video::Video;
@@ -22,25 +22,18 @@ use agb::fixnum::{FixedNum, Num, num, Number, Vector2D};
 use agb::input::{Button, ButtonController, Tri};
 use agb::interrupt::Interrupt;
 use agb::{Gba, println};
+use agb::display::font::TextRenderer;
 use agbrs_flash::FlashMemory;
-// use agbrs_flash::FlashMemory;
 use once_cell::sync::Lazy;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::SplitMix64;
 use serde::{Deserialize, Serialize};
-// use gamemode::GameMode;
-// use state::gamestate::GameState;
-// use state::inventory::Inventory;
-// use state::map::MapData;
-// use state::player::{Direction, PlayerObj};
-// use traits::{Digits, NextTo};
-// use crate::state::inventory::ItemType;
-// use crate::state::serialized::SerializedState;
+use gamemode::GameMode;
+mod gamemode;
+mod state;
+mod traits;
 
-// mod state;
-// mod traits;
-// mod gamemode;
-agb::include_background_gfx!(background, tiles => 256 "map.png", font => "font.png");
+static FONT: Font = agb::include_font!("DeltaBlock-Regular.ttf", 20);
 
 #[derive(Debug)]
 struct Mode7Params {
@@ -73,29 +66,38 @@ fn m7_hbl_a(cam: Vector3D<FixedNum<8>>, vcount: u16) -> Mode7Params {
     let x = cam.x - (xs * (cos_phi) - ys * (sin_phi));
     let y = cam.z - (xs * (sin_phi) + ys * (cos_phi));
 
-    // if vcount == 0 {
-    //     println!("{:?} {:?}", cam, phi);
-    // }
-
     Mode7Params { pa, pc, x, y }
 }
 
-fn menu_mode(gba: &mut Gba) -> () {
+fn draw_menu_items(fg_color: u8, bg_color: u8, font_fg: &mut RegularMap, vram: &mut VRamManager, newgame: bool, can_reload: bool, renderer: &mut TextRenderer) -> () {
+    renderer.clear(vram);
+    font_fg.clear(vram);
+    let mut writer = renderer.writer(fg_color, bg_color, font_fg, vram);
+
+    writeln!(&mut writer, "{}New Game", if newgame {">"} else {" "}).unwrap();
+    if can_reload {
+        writeln!(&mut writer, "{}Continue", if newgame { " " } else { ">" }).unwrap();
+    }
+
+    writer.commit();
+    font_fg.commit(vram);
+}
+
+fn menu_mode(gba: &mut Gba, memory: &mut FlashMemory) -> (bool, u64) {
     let (tiled, mut vram) = gba.display.video.tiled1();
     let vblank = agb::interrupt::VBlank::get();
-    let tileset = &background::tiles.tiles;
+    let tileset = &gamemode::background::tiles256.tiles;
 
-    vram.set_background_palettes(background::PALETTES);
+    vram.set_background_palettes(gamemode::background::PALETTES);
 
-    let mut floor = tiled.affine(Priority::P0, AffineBackgroundSize::Background16x16);
-    let mut bg = tiled.regular(Priority::P1, Background64x64, TileFormat::EightBpp);
+    let mut floor = tiled.affine(Priority::P1, AffineBackgroundSize::Background16x16);
+    let mut bg = tiled.regular(Priority::P2, Background64x64, TileFormat::EightBpp);
 
     // configure floor tiles
     for y in 0..16u16 {
         for x in 0..16u16 {
             let i = y * 16 + x;
             let tile_id = 0;
-            println!("{}, {}: {}", x, y, tile_id);
             floor.set_tile(&mut vram, (x, y), tileset, tile_id as u8)
         }
     }
@@ -105,7 +107,7 @@ fn menu_mode(gba: &mut Gba) -> () {
     // configure background (water) tiles
     for y in 0..64u16 {
         for x in 0..64u16 {
-            bg.set_tile(&mut vram, (x, y), tileset, background::tiles.tile_settings[1]);
+            bg.set_tile(&mut vram, (x, y), tileset, gamemode::background::tiles256.tile_settings[1]);
         }
     }
     bg.set_visible(false);
@@ -133,31 +135,73 @@ fn menu_mode(gba: &mut Gba) -> () {
             *bg_affine_matrix = AffineMatrix::from_raw(params.pa, 0.into(), params.pc, 0.into(), params.x, params.y).to_background_wrapping();
         })
     };
-    let mut input = agb::input::ButtonController::new();
+
+
+    let mut font_fg = tiled.regular(Priority::P0, Background32x32, TileFormat::FourBpp);
+
+    let font_bg_tile = vram.new_dynamic_tile().fill_with(0);
+
+    for y in 0..20u16 {
+        for x in 0..30u16 {
+            font_fg.set_tile(&mut vram, (x,y), &font_bg_tile.tile_set(), font_bg_tile.tile_setting());
+        }
+    }
+
+    vram.remove_dynamic_tile(font_bg_tile);
+
+    // find bgcolor and fgcolor indices that coincide with expected colors
+    let bg_color = (0..16).find(|&a| gamemode::background::PALETTES[0].colour(a) == 0x5dfa).unwrap() as u8;
+    let fg_color = (0..16).find(|&a| gamemode::background::PALETTES[0].colour(a) == 0x7fff).unwrap() as u8;
+
+
+    let mut input = ButtonController::new();
+    let mut newgame = true;
+    let can_reload = memory.have_structure();
+    let mut renderer = FONT.render_text((10u16, 3u16));
+    draw_menu_items(fg_color, bg_color, &mut font_fg, &mut vram, newgame, can_reload, &mut renderer);
+    let mut frame = 0u64;
     loop {
         input.update();
-        agb::display::busy_wait_for_vblank();
+        if (input.is_just_pressed(Button::DOWN) || input.is_just_pressed(Button::UP)) && can_reload {
+            newgame = !newgame;
+            draw_menu_items(fg_color, bg_color, &mut font_fg, &mut vram, newgame, can_reload, &mut renderer);
+        }
+        if input.is_just_pressed(Button::A) {
+            break;
+        }
+        for i in 0..1 {
+            vblank.wait_for_vblank();
+        }
+        font_fg.set_visible(true);
         floor.set_visible(true);
         bg.set_visible(true);
+        frame += 1;
     }
+    font_fg.set_visible(false);
+    floor.set_visible(false);
+    bg.set_visible(false);
+    drop(ih);
+    renderer.clear(&mut vram);
+    return (newgame, frame);
 }
 
 #[agb::entry]
 fn main(mut gba: agb::Gba) -> ! {
-    let memory = FlashMemory::new_flash_128k(&mut gba);
+    let mut memory = FlashMemory::new_flash_128k(&mut gba);
+
+    let (do_newgame, frame) = menu_mode(&mut gba, &mut memory);
+
+    let seed = frame << 8 | (frame >> (64-8) & 0xff);
+
+    let (mut tiled, mut vram) = gba.display.video.tiled0();
+    let (mut oam, mut spriteloader) = gba.display.object.get_unmanaged();
+
+
+    let mut game = GameMode::new(&mut tiled, &mut vram, &mut oam, &mut spriteloader, memory, !do_newgame, seed);
 
     loop {
-        menu_mode(&mut gba)
+        game.step();
+        game.update();
+        agb::display::busy_wait_for_vblank();
     }
-    // let (mut tiled, mut vram) = gba.display.video.tiled0();
-    // let (mut oam, mut spriteloader) = gba.display.object.get_unmanaged();
-    //
-    //
-    // let mut game = GameMode::new(&mut tiled, &mut vram, &mut oam, &mut spriteloader, memory);
-    //
-    // loop {
-    //     game.step();
-    //     game.update();
-    //     agb::display::busy_wait_for_vblank();
-    // }
 }

@@ -46,15 +46,16 @@ impl MapData {
                 };
                 bg.set_tile(
                     &mut vram, (x, y),
-                    &gamemode::background::tiles.tiles,
-                    gamemode::background::tiles.tile_settings[tileid],
+                    &gamemode::background::tiles16.tiles,
+                    gamemode::background::tiles16.tile_settings[tileid],
                 );
             }
         }
     }
 
-    pub fn gen() -> Self {
-        let mut mix64 = rand_xoshiro::SplitMix64::seed_from_u64(0x7af07af07af07af0u64);
+    pub fn gen(seed_mix: u64) -> Self {
+        let seed = 0x7af07af07af07af0u64 ^ seed_mix;
+        let mut mix64 = SplitMix64::seed_from_u64(seed);
         let mut points: [u8; 9] = [0; 9];
         let start_point: u8 =
             (15i8 + 6i8 - (mix64.gen::<u8>() % 12u8) as i8) as u8;
@@ -84,7 +85,6 @@ impl MapData {
                 }
             };
             data.tree_positions[i] = (x, y, 1);
-            agb::println!("{} = ({}, {})", i, x, y);
         }
 
         data

@@ -9,26 +9,29 @@ pub struct GameState {
     map_data: MapData,
     player_obj: PlayerObj,
     inventory: Inventory,
+    frame: usize,
 }
 
 impl<'obj> GameState {
-    pub fn from_save_state(sprite_loader: &'obj mut SpriteLoader, state: SerializedState) -> Self {
-        let mut player_obj = PlayerObj::new(sprite_loader);
+    pub fn from_save_state(state: SerializedState) -> Self {
+        let mut player_obj = PlayerObj::new();
         player_obj.set_position((state.player.0, state.player.1));
         player_obj.set_direction(state.player.2);
         let state = Self {
             map_data: state.map_data,
             inventory: state.inventory,
             player_obj,
+            frame: state.frame,
         };
         state
     }
 
-    pub fn new(sprite_loader: &'obj mut SpriteLoader) -> Self {
+    pub fn new(seed_mix: u64) -> Self {
         let state = Self {
-            map_data: MapData::gen(),
-            player_obj: PlayerObj::new(sprite_loader),
+            map_data: MapData::gen(seed_mix),
+            player_obj: PlayerObj::new(),
             inventory: Inventory::default(),
+            frame: 0,
         };
         state
     }
@@ -61,5 +64,13 @@ impl<'obj> GameState {
 
     pub fn inventory_mut(&mut self) -> &mut Inventory {
         return &mut self.inventory;
+    }
+    pub fn frame(&self) -> usize {
+        return self.frame;
+    }
+
+    pub fn step_frame(&mut self) -> usize {
+        self.frame += 1;
+        return self.frame;
     }
 }
