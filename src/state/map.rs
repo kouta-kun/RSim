@@ -84,7 +84,7 @@ impl MapData {
                     break (x, y);
                 }
             };
-            data.tree_positions[i] = (x, y, 1);
+            data.tree_positions[i] = (x, y, 0);
         }
 
         data
@@ -95,7 +95,7 @@ impl MapData {
         if x >= 32 || y >= 32 {
             panic!("Out of bounds!!! {:?}", (x, y));
         }
-        let mut row = &mut values[y];
+        let row = &mut values[y];
         if value {
             *row |= 1 << x;
         } else {
@@ -159,7 +159,7 @@ impl MapData {
     }
     pub fn has_tree(&self, point: (u16, u16)) -> bool {
         for i in 0..TREECOUNT {
-            if self.tree_positions[i].2 > 0 && (self.tree_positions[i].0, self.tree_positions[i].1) == point {
+            if self.tree_positions[i].2 == 0 && (self.tree_positions[i].0, self.tree_positions[i].1) == point {
                 return true;
             }
         }

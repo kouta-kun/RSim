@@ -4,30 +4,18 @@
 
 
 extern crate alloc;
-
-use alloc::boxed::Box;
-use alloc::format;
-use alloc::rc::Rc;
-use alloc::vec::Vec;
-use core::fmt::{Debug, Formatter, Write};
-use core::mem::size_of;
-use core::ops::{DerefMut, Neg};
+use core::fmt::Write;
 use agb::display::affine::{AffineMatrix, AffineMatrixBackground};
-use agb::display::object::{AffineMatrixInstance, AffineMode, Graphics, OamManaged, OamUnmanaged, Object, ObjectUnmanaged, SpriteLoader, SpriteVram, Tag};
 use agb::display::{Font, Priority};
-use agb::display::tiled::{AffineBackgroundSize, MapLoan, RegularBackgroundSize, RegularMap, Tiled0, Tiled1, TiledMap, TileFormat, TileSetting, VRamManager};
+use agb::display::tiled::{AffineBackgroundSize, RegularMap, TiledMap, TileFormat, VRamManager};
 use agb::display::tiled::RegularBackgroundSize::{Background32x32, Background64x64};
-use agb::display::video::Video;
-use agb::fixnum::{FixedNum, Num, num, Number, Vector2D};
-use agb::input::{Button, ButtonController, Tri};
+use agb::fixnum::{FixedNum,  num, Number};
+use agb::input::{Button, ButtonController};
 use agb::interrupt::Interrupt;
-use agb::{Gba, println};
+use agb::{Gba};
 use agb::display::font::TextRenderer;
 use agbrs_flash::FlashMemory;
 use once_cell::sync::Lazy;
-use rand::{Rng, SeedableRng};
-use rand_xoshiro::SplitMix64;
-use serde::{Deserialize, Serialize};
 use gamemode::GameMode;
 mod gamemode;
 mod state;
@@ -96,7 +84,6 @@ fn menu_mode(gba: &mut Gba, memory: &mut FlashMemory) -> (bool, u64) {
     // configure floor tiles
     for y in 0..16u16 {
         for x in 0..16u16 {
-            let i = y * 16 + x;
             let tile_id = 0;
             floor.set_tile(&mut vram, (x, y), tileset, tile_id as u8)
         }
@@ -114,18 +101,18 @@ fn menu_mode(gba: &mut Gba, memory: &mut FlashMemory) -> (bool, u64) {
     bg.commit(&mut vram);
 
 
-    let pos: Vector3D<FixedNum<8>> = (Vector3D {
+    let pos: Vector3D<FixedNum<8>> = Vector3D {
         x: num!(65.0),
         y: num!(32.0),
         z: num!(65.0),
-    });
+    };
 
 
 
     // we cast to usize to avoid complaints of object being passed through (ABSURDLY UNSAFE)
     let bg_affine_matrix = floor.bg_affine_matrix().as_ptr() as usize;
     let ih = unsafe {
-        agb::interrupt::add_interrupt_handler(Interrupt::HBlank, move |cs| {
+        agb::interrupt::add_interrupt_handler(Interrupt::HBlank, move |_cs| {
             const VCOUNT: *const u16 = 0x0400_0006 as *const u16; // REG_VCOUNT contains Y line after HBlank
             let line_count = *VCOUNT;
             let bg_affine_matrix = bg_affine_matrix as *mut AffineMatrixBackground;
@@ -169,9 +156,7 @@ fn menu_mode(gba: &mut Gba, memory: &mut FlashMemory) -> (bool, u64) {
         if input.is_just_pressed(Button::A) {
             break;
         }
-        for i in 0..1 {
-            vblank.wait_for_vblank();
-        }
+        vblank.wait_for_vblank();
         font_fg.set_visible(true);
         floor.set_visible(true);
         bg.set_visible(true);

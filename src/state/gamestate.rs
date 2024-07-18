@@ -1,4 +1,3 @@
-use agb::display::object::SpriteLoader;
 use agb::display::tiled::{MapLoan, RegularMap, TiledMap, VRamManager};
 use crate::state::inventory::Inventory;
 use crate::state::map::MapData;

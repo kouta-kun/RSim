@@ -17,7 +17,6 @@ agb::include_background_gfx!(pub background, "d77bba", tiles256 => 256 "map.asep
 
 pub struct GameMode<'a, 'b> {
     vram: &'b mut VRamManager,
-    tiled: &'b Tiled0<'a>,
     state: GameState,
     oam: &'b mut OamUnmanaged<'a>,
     button_controller: ButtonController,
@@ -28,6 +27,9 @@ pub struct GameMode<'a, 'b> {
     player_obj: ObjectUnmanaged,
     player_sprites: Vec<SpriteVram>,
 }
+
+const FRAMES_PER_STEP: usize = 35;
+const TREE_LIFETIME_IN_STEPS: i8 = 45;
 
 impl<'a, 'b> GameMode<'a, 'b>
 where
@@ -47,13 +49,13 @@ where
         let mut background = tiled.background(Priority::P3, Background32x32, TileFormat::FourBpp);
         state.upload(vram, &mut background);
         let tree_sprite = spriteloader.get_vram_sprite(&TREE_SPRITE.sprites()[0]);
-        let tree_obj = state.map_data().get_tree_positions().map(|tree| {
+        let tree_obj = state.map_data().get_tree_positions().map(|_| {
             ObjectUnmanaged::new(tree_sprite.clone())
         });
         let player_sprites = MAN_SPRITE.sprites().iter().map(|sprite| spriteloader.get_vram_sprite(sprite)).collect::<Vec<_>>();
-        let mut player_obj = ObjectUnmanaged::new(player_sprites[0].clone());
-        let mut menumap = tiled.background(Priority::P0, Background32x32, TileFormat::FourBpp);
-        let mut game = Self { tiled, vram, state, oam, button_controller, background, tree_obj, menumap, memory, player_obj, player_sprites };
+        let player_obj = ObjectUnmanaged::new(player_sprites[0].clone());
+        let menumap = tiled.background(Priority::P0, Background32x32, TileFormat::FourBpp);
+        let game = Self { vram, state, oam, button_controller, background, tree_obj, menumap, memory, player_obj, player_sprites };
         game
     }
 
@@ -77,7 +79,7 @@ where
         }
 
         for (_index, (tree, obj)) in self.state.map_data().get_tree_positions().iter().zip(self.tree_obj.iter_mut()).enumerate() {
-            let (x, y, state) = *tree;
+            let (x, y, timeout) = *tree;
             let px = x as i32 * 8;
             let y = (y as i16) - (if self.state.player_obj().get_position().1 as u16 > Y_SCROLL_THRESHOLD as u16 {
                 self.state.player_obj().get_position().1 as i16 - Y_SCROLL_THRESHOLD as i16
@@ -85,7 +87,7 @@ where
             let py = (y as i32 * 8) - 8;
             obj.set_position(Vector2D::new(px, py));
             obj.set_priority(Priority::P1);
-            if state > 0 && py < 128 {
+            if timeout == 0 && py < 128 {
                 obj.show();
             } else {
                 obj.hide();
@@ -96,9 +98,9 @@ where
             let (px, py) = (px as u16, py as u16);
             let mut found_wood = 0;
             for tree in self.state.map_data_mut().get_tree_positions_mut().iter_mut() {
-                let (tx, ty, active) = *tree;
-                if (tx, ty).is_next_to(&(px, py)) && active > 0 {
-                    tree.2 = 0;
+                let (tx, ty, timeout) = *tree;
+                if (tx, ty).is_next_to(&(px, py)) && timeout == 0 {
+                    tree.2 = TREE_LIFETIME_IN_STEPS;
                     found_wood += 3;
                 }
             }
@@ -144,6 +146,15 @@ where
         self.player_obj.set_position(pos);
         self.player_obj.set_priority(Priority::P2);
         self.player_obj.show_affine(AffineMode::Affine);
+
+        if current_frame % FRAMES_PER_STEP == 0 {
+            for tree in self.state.map_data_mut().get_tree_positions_mut().iter_mut() {
+                let (_, _, timeout) = *tree;
+                if timeout > 0 {
+                    tree.2 = tree.2.saturating_sub(1);
+                }
+            }
+        }
 
         if current_frame % 60 * 10 == 0 {
             let (px, py) = self.state.player_obj().get_position();
@@ -218,7 +229,7 @@ where
             }
         }
 
-        let time = (self.state.frame() / 35);
+        let time = self.state.frame() / FRAMES_PER_STEP;
         let ss = time % 60;
         let mm = (time / 60) % 24;
 

@@ -1,5 +1,5 @@
 pub trait Digits {
-    fn digits(&self) -> impl Iterator;
+    fn digits(&self) -> impl Iterator<Item=u8>;
 }
 
 impl Digits for u8 {
